@@ -1,20 +1,17 @@
 # Copyright 2011 James McCauley
 # Copyright 2008 (C) Nicira, Inc.
 #
-# This file is part of POX.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
 #
-# POX is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# POX is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with POX.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 # This file is derived from the packet library in NOX, which was
 # developed by Nicira, Inc.
@@ -47,13 +44,11 @@ from packet_utils       import *
 from tcp import *
 from udp import *
 from icmp import *
+from igmp import *
 
 from packet_base import packet_base
 
-from pox.lib.addresses import IPAddr
-
-IP_ANY = IPAddr("0.0.0.0")
-IP_BROADCAST = IPAddr("255.255.255.255")
+from pox.lib.addresses import IPAddr, IP_ANY, IP_BROADCAST
 
 class ipv4(packet_base):
     "IP packet struct"
@@ -64,6 +59,7 @@ class ipv4(packet_base):
     ICMP_PROTOCOL = 1
     TCP_PROTOCOL  = 6
     UDP_PROTOCOL  = 17
+    IGMP_PROTOCOL = 2
 
     DF_FLAG = 0x02
     MF_FLAG = 0x01
@@ -96,17 +92,17 @@ class ipv4(packet_base):
         self._init(kw)
 
     def __str__(self):
-        s = ''.join(('(','[v:'+str(self.v),'hl:'+str(self.hl),\
-                         'l:', str(self.iplen),'t:', \
-                         str(self.ttl), ']', ipproto_to_str(self.protocol), \
-                         ' cs:', '%x' %self.csum, '[',str(self.srcip), \
-                         '>', str(self.dstip),'])'))
-        if self.next == None:
-            return s
-        return ''.join((s, str(self.next)))
+        s = "[IP+%s %s>%s (cs:%02x v:%s hl:%s l:%s t:%s)]" % (
+            ipproto_to_str(self.protocol),
+            self.srcip, self.dstip,
+            self.csum,
+            self.v, self.hl, self.iplen, self.ttl)
+
+        return s
 
     def parse(self, raw):
         assert isinstance(raw, bytes)
+        self.next = None # In case of unfinished parsing
         self.raw = raw
         dlen = len(raw)
         if dlen < ipv4.MIN_LEN:
@@ -123,23 +119,26 @@ class ipv4(packet_base):
         self.flags = self.frag >> 13
         self.frag  = self.frag & 0x1fff
 
-        if self.v != ipv4.IPv4:
-            self.msg('ip parse) warning IP version %u not IPv4' % self.v)
-            return
-        elif self.hl < 5:
-            self.msg('(ip parse) warning IP header %u longer than len %u' \
-                        % (self.hl, self.iplen))
-            return
-        elif self.iplen < ipv4.MIN_LEN:
-            self.msg('(ip parse) warning invalid IP len %u' % self.iplen)
-            return
-        elif (self.hl * 4) >= self.iplen or (self.hl * 4) > dlen:
-            self.msg('(ip parse) warning IP header %u longer than len %u' \
-                        % (self.hl, self.iplen))
-            return
-
         self.dstip = IPAddr(self.dstip)
         self.srcip = IPAddr(self.srcip)
+
+        if self.v != ipv4.IPv4:
+            self.msg('(ip parse) warning: IP version %u not IPv4' % self.v)
+            return
+        if self.hl < 5:
+            self.msg('(ip parse) warning: IP header length shorter than MIN_LEN (IHL=%u => header len=%u)' \
+                        % (self.hl, 4 * self.hl))
+            return
+        if self.iplen < ipv4.MIN_LEN:
+            self.msg('(ip parse) warning: Invalid IP len %u' % self.iplen)
+            return
+        if (self.hl * 4) > self.iplen:
+            self.msg('(ip parse) warning: IP header longer than IP length including payload (%u vs %u)' \
+                        % (self.hl, self.iplen))
+            return
+        if (self.hl * 4) > dlen:
+            self.msg('(ip parse) warning: IP header is truncated')
+            return
 
         # At this point, we are reasonably certain that we have an IP
         # packet
@@ -154,6 +153,8 @@ class ipv4(packet_base):
             self.next = tcp(raw=raw[self.hl*4:length], prev=self)
         elif self.protocol == ipv4.ICMP_PROTOCOL:
             self.next = icmp(raw=raw[self.hl*4:length], prev=self)
+        elif self.protocol == ipv4.IGMP_PROTOCOL:
+            self.next = igmp(raw=raw[self.hl*4:length], prev=self)
         elif dlen < self.iplen:
             self.msg('(ip parse) warning IP packet data shorter than IP len: %u < %u' % (dlen, self.iplen))
         else:
@@ -179,4 +180,3 @@ class ipv4(packet_base):
                            (self.flags << 13) | self.frag, self.ttl,
                            self.protocol, self.csum, self.srcip.toUnsigned(),
                            self.dstip.toUnsigned())
-

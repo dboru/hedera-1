@@ -49,13 +49,15 @@ class Switch (EventMixin):
   def send_packet_data(self, outport, data = None):
     msg = of.ofp_packet_out(in_port=of.OFPP_NONE, data = data)
     msg.actions.append(of.ofp_action_output(port = outport))
-    self.connection.send(msg)
+    if self.connection is not None:
+        self.connection.send(msg)
 
   def send_packet_bufid(self, outport, buffer_id = -1):
     msg = of.ofp_packet_out(in_port=of.OFPP_NONE)
     msg.actions.append(of.ofp_action_output(port = outport))
     msg.buffer_id = buffer_id
-    self.connection.send(msg)
+    if self.connection is not None:
+        self.connection.send(msg)
 
   def install(self, port, match, buf = -1):
     msg = of.ofp_flow_mod()
@@ -65,7 +67,8 @@ class Switch (EventMixin):
     msg.hard_timeout = 120 
     msg.actions.append(of.ofp_action_output(port = port))
     msg.buffer_id = buf
-    self.connection.send(msg)
+    if self.connection is not None:
+        self.connection.send(msg)
 
   def _handle_ConnectionDown (self, event):
     self.disconnect()
@@ -95,14 +98,15 @@ class RipLController(EventMixin):
     route = self.r.get_route(in_name, out_name, packet)
     #log.info("route: %s" % route)
     match = of.ofp_match.from_packet(packet)
-    for i, node in enumerate(route):
-      node_dpid = self.t.id_gen(name = node).dpid
-      if i < len(route) - 1:
-        next_node = route[i + 1]
-        out_port, next_in_port = self.t.port(node, next_node)
-      else:
-        out_port = final_out_port
-      self.switches[node_dpid].install(out_port, match)
+    if route is not None: 
+        for i, node in enumerate(route):
+            node_dpid = self.t.id_gen(name = node).dpid
+            if i < len(route) - 1:
+                next_node = route[i + 1]
+                out_port, next_in_port = self.t.port(node, next_node)
+            else:
+                out_port = final_out_port
+            self.switches[node_dpid].install(out_port, match)
 
   def _handle_PacketIn(self, event):
     if not self.all_switches_up:

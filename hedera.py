@@ -88,7 +88,7 @@ assert(os.path.exists(IPERF_PATH))
 if not os.path.exists(args.dir):
   os.makedirs(args.dir)
 
-lg.setLogLevel('info')
+lg.setLogLevel('output')
 
 # Control network
 class NonblockingFatTreeTopo(Topo):
@@ -104,11 +104,11 @@ class NonblockingFatTreeTopo(Topo):
     if k % 2 != 0:
       raise Exception('k must be even')
     
-    switch = self.add_switch('s1')
+    switch = self.addSwitch('s1')
 
     for host_index in range((k**3) / 4):
-      host = self.add_host(get_host_name(k, host_index))
-      self.add_link(host, switch, port1=0, port2=host_index)
+      host = self.addHost(get_host_name(k, host_index))
+      self.addLink(host, switch, port1=0, port2=host_index)
     
 # Host index is in [0, k**3/4)
 def get_host_name(k, host_index):
@@ -203,12 +203,12 @@ def run_expt(net, k, flowsToCreate):
   for dest_index in dstSet:
     dest_host_name = get_host_name(k, dest_index)
     dest = net.getNodeByName(dest_host_name)
-    dest.cmd('%s -s -p %s > /dev/null &' % (IPERF_PATH, port))
+    dest.cmd('iperf -s -p %s -i 1 > serv_%s &' % (port,dest.IP()))
   
   for src_index, dest_index in flowsToCreate:
     src = net.getNodeByName(get_host_name(k, src_index))
     dest = net.getNodeByName(get_host_name(k, dest_index))
-    wait_listening(src, dest, port)
+    #wait_listening(src, dest, port)
   
   print "Listeners waiting"
 
@@ -216,13 +216,15 @@ def run_expt(net, k, flowsToCreate):
   monitor = Process(target=monitor_devs_ng, args=('%s/bwm.txt' % args.dir, 1.0))
   monitor.start()
 
-  start_tcpprobe()
+  #start_tcpprobe()
   
   # Start the senders
   for src_index, dest_index in flowsToCreate:
     src = net.getNodeByName(get_host_name(k, src_index))
     dest = net.getNodeByName(get_host_name(k, dest_index))
-    src.cmd('%s -c %s -p %s -t %d -i 1 -yc > /dev/null &' % (IPERF_PATH, dest.IP(), port, seconds))
+    src.cmd('iperf -c %s -p %s -t %d -i 1 -yc > iperf_%s &' % ( dest.IP(), port, seconds,dest.IP()))
+    
+    #src.cmd('iperf -c %s -p %s -t %d -i 1 -yc > /dev/null &' % (dest.IP(), port, seconds))
 
   print "Senders sending"
 
@@ -237,7 +239,7 @@ def run_expt(net, k, flowsToCreate):
   print "Waiting for monitor to stop"
   monitor.terminate()
   os.system('killall -9 bwm-ng')
-  stop_tcpprobe()
+  #stop_tcpprobe()
 
 def addMatrixToFlow(flowToCreate, matrix):
   for i in range(len(matrix)):
@@ -261,7 +263,7 @@ def main():
 
   k = args.k
   host = custom(CPULimitedHost, cpu=4.0/(k**3))
-  link = custom(TCLink, bw=args.bw, delay='0ms')
+  link = custom(TCLink, bw=args.bw)
 
   if args.control:
     topo = NonblockingFatTreeTopo(k=k)
@@ -270,6 +272,8 @@ def main():
     topo = FatTreeTopo(k=k)
     net = Mininet(topo=topo, host=host, link=link, build=True, cleanup=True, autoPinCpus=True, autoSetMacs=True, controller=RemoteController)
   net.start()
+  
+  sleep(5)
 
   flowsToCreate = []
   for fcount in range(args.fph):
@@ -288,8 +292,8 @@ def main():
     print "Running with matrix", matrix
     addMatrixToFlow(flowsToCreate, matrix)
 
-  if args.controller:
-    controller = Popen(args.controller, shell=True, preexec_fn=os.setsid)
+  #if args.controller:
+  #  controller = Popen(args.controller, shell=True, preexec_fn=os.setsid)
 
   # NOTE: special signal for random number of flows
   if args.fph >= 6:
@@ -300,10 +304,10 @@ def main():
   run_expt(net, k, flowsToCreate)
   end = time()
 
-  if args.controller:
-    os.killpg(controller.pid, signal.SIGKILL)
+  #if args.controller:
+  #  os.killpg(controller.pid, signal.SIGKILL)
 
-  net.stop()
+  #net.stop()
   
 if __name__ == '__main__':
   check_prereqs()
